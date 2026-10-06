@@ -1,0 +1,9 @@
+{
+  "name": "mod-jxf-fancy-details",
+  "version": "0.3.20261006024144",
+  "description": "Prompt and tool timers, per-reply usage prefixes and a usage footer.",
+  "author": {
+    "name": "John Feminella"
+  },
+  "repository": "https://github.com/fj/agent-plugins"
+}
