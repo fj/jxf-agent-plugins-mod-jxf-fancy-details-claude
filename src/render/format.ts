@@ -3,6 +3,7 @@ import type { Cost } from '../core/cost.ts'
 const MS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 3600
+const MS_PER_MINUTE = MS_PER_SECOND * SECONDS_PER_MINUTE
 const THOUSAND = 1000
 const MILLION = 1_000_000
 const CENTS_DIGITS = 2
@@ -42,6 +43,19 @@ export function formatUsd(cost: Cost): string {
   return `$${cost.usd.toFixed(CENTS_DIGITS)}${cost.isLowerBound ? '+' : ''}`
 }
 
+const withoutTrailingSlash = (path: string) => (path.length > 1 ? path.replace(/\/+$/, '') : path)
+
+export function isHomeOrAncestor(path: string, home: string): boolean {
+  if (home === '') {
+    return false
+  }
+
+  const dir = withoutTrailingSlash(path)
+  const homeDir = withoutTrailingSlash(home)
+
+  return dir === homeDir || dir === '/' || homeDir.startsWith(`${dir}/`)
+}
+
 export function shortenPath(path: string, home: string, maxWidth: number): string {
   const tilde = home !== '' && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
 
@@ -58,4 +72,16 @@ export function shortenPath(path: string, home: string, maxWidth: number): strin
   }
 
   return `${head}/…/${tail.join('/')}`
+}
+
+export function formatRemaining(ms: number): string {
+  if (ms <= 0) {
+    return '0m'
+  }
+
+  return ms < MS_PER_MINUTE ? '<1m' : `${Math.ceil(ms / MS_PER_MINUTE)}m`
+}
+
+export function modelLabel(...parts: readonly string[]): string {
+  return parts.filter(part => part !== '').join('/')
 }

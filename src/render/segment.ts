@@ -11,6 +11,8 @@ export type Role =
   | 'path'
   | 'branch'
   | 'meter'
+  | 'overage'
+  | 'warning'
 
 export type Segment = { text: string; role: Role }
 
