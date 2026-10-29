@@ -3,13 +3,15 @@ import type { EngineInterface, On, SessionContextUsage, TurnUsage } from 'claude
 
 import type { ClaudeCodeCacheEnv } from '../../core/cache.ts'
 import type { DailyStore } from '../../core/daily.ts'
+import { readGit, SHOW_STATUS } from '../../core/git-status.ts'
+import { latestRun, type LatestRun } from '../../core/latest.ts'
 import { applyRecord, EMPTY_JOURNAL, type JournalRecord } from '../../core/journal.ts'
 import { aliasRow, appendKeyText, EMPTY_ROWS, noteText, pendingMessageMark, pendingPrompt } from '../../core/rows.ts'
 import { isPersistedRecord, NO_OTHER_SESSIONS, persistDay, readOtherSessions } from '../../core/tracker.ts'
 import type { TokenUsage } from '../../core/usage.ts'
+import { gitStatusText } from '../../render/git-status.ts'
 import type { Config } from './config.ts'
 import { fileDailyStore, sessionKeyFor, type Files } from './daily.ts'
-import { branchFrom, SHOW_BRANCH } from './git.ts'
 import { isUserOrigin } from './origin.ts'
 import { claudeCodeBilling, claudeCodeProvider, type CloudFlags } from './provider.ts'
 
@@ -19,6 +21,7 @@ const rowsAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'rows' } as const,
 const rateLimitsAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'rateLimits' } as const, [])
 const contextAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'context' } as const, null)
 const branchAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'branch' } as const, null)
+const gitStatusAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'gitStatus' } as const, null)
 const routeAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'route' } as const, null)
 const effortAtom = atom({ plugin: 'mod-jxf-fancy-details', key: 'effort' } as const, null)
 
@@ -71,13 +74,17 @@ async function refreshOthers($: EngineInterface): Promise<void> {
   await update($, othersAtom, () => others)
 }
 
-async function refreshBranch($: EngineInterface): Promise<void> {
+async function refreshGit($: EngineInterface, gitRuns: LatestRun): Promise<void> {
   const cwd = await $.session.cwd()
-  const branch = await $.process
-    .run(SHOW_BRANCH, { cwd, timeoutMs: GIT_TIMEOUT_MS })
-    .then(branchFrom)
-    .catch(() => null)
-  await update($, branchAtom, () => branch)
+  const reading = $.process
+    .run(SHOW_STATUS, { cwd, timeoutMs: GIT_TIMEOUT_MS })
+    .then(readGit)
+    .catch(() => undefined)
+
+  await gitRuns(reading, async git => {
+    await update($, branchAtom, branch => (git === undefined ? branch : git.branch))
+    await update($, gitStatusAtom, () => (git === undefined || git.status === null ? null : gitStatusText(git.status)))
+  })
 }
 
 async function cloudFlags($: EngineInterface): Promise<CloudFlags> {
@@ -118,8 +125,8 @@ async function refreshRoute($: EngineInterface): Promise<void> {
   await update($, routeAtom, () => ({ provider, billing, cache }))
 }
 
-async function refreshPolled($: EngineInterface): Promise<void> {
-  await Promise.all([refreshOthers($), refreshBranch($)])
+async function refreshPolled($: EngineInterface, gitRuns: LatestRun): Promise<void> {
+  await Promise.all([refreshOthers($), refreshGit($, gitRuns)])
 }
 
 function debugLog($: EngineInterface, isDebug: boolean, text: string): void {
@@ -137,12 +144,14 @@ async function refreshUsage($: EngineInterface): Promise<void> {
 }
 
 export function trackEvents(on: On, config: Config): void {
+  const gitRuns = latestRun()
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await refreshRoute($)
     await refreshUsage($)
-    await refreshPolled($)
-    $.clock.every(POLL_MS, () => void refreshPolled($))
+    await refreshPolled($, gitRuns)
+    $.clock.every(POLL_MS, () => void refreshPolled($, gitRuns))
 
     return started
   })
@@ -254,7 +263,7 @@ export function trackEvents(on: On, config: Config): void {
       return await next(e)
     } finally {
       await record($, config, { kind: 'toolEnd', id, at: await $.clock.now() })
-      await refreshBranch($)
+      void refreshGit($, gitRuns).catch(() => undefined)
     }
   })
 
@@ -266,7 +275,7 @@ export function trackEvents(on: On, config: Config): void {
         await record($, config, { kind: 'turnEnd', at: await $.clock.now() })
       }
 
-      await refreshPolled($)
+      await refreshPolled($, gitRuns)
     }
 
     return next(e)
